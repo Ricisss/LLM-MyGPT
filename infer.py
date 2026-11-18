@@ -106,14 +106,37 @@ class GPTLanguageModel(nn.Module):
         return logits, None
 
     @torch.no_grad()
-    def generate(self, idx, max_new_tokens):
+    def generate(self, idx, max_new_tokens, temperature=0.8, top_k=50, top_p=0.9, stop_ids=None):
         for _ in range(max_new_tokens):
             idx_cond = idx[:, -block_size:]
             logits, _ = self(idx_cond)
             logits = logits[:, -1, :]
+            #Apply temperature scaling
+            logits = logits / temperature
+            
+            # 2. Top-k: drop everything below the k-th best score
+            if top_k is not None:
+                kth_best = torch.topk(logits, min(top_k, logits.size(-1))).values[:, -1, None]
+                logits = logits.masked_fill(logits < kth_best, float('-inf'))
+            
+            # 3. Top-p: keep the smallest set of tokens whose probability mass reaches top_p            
+            if top_p is not None and top_p < 1.0:
+                sorted_logits, sorted_idx = torch.sort(logits, descending=True)
+                sorted_probs = F.softmax(sorted_logits, dim=-1)
+                cumulative = torch.cumsum(sorted_probs, dim=-1)
+                # remove a token if the mass *before* it already reached top_p
+                # (this way the best token is always kept)
+                remove = (cumulative - sorted_probs) >= top_p
+                sorted_logits = sorted_logits.masked_fill(remove, float('-inf'))
+                # put the filtered scores back in their original vocab order
+                logits = torch.full_like(logits, float('-inf')).scatter(1, sorted_idx, sorted_logits)
+
             probs = F.softmax(logits, dim=-1)
             idx_next = torch.multinomial(probs, num_samples=1)
             idx = torch.cat((idx, idx_next), dim=1)
+            
+            if stop_ids is not None and idx[0, -len(stop_ids):].tolist() == stop_ids:
+                break
         return idx
 
 # 4. Initialize model instance and load trained weights
@@ -123,12 +146,22 @@ model.eval()
 print("Model loaded successfully!")
 
 # 5. Generate text
-prompt = "#TITLE#"
+prompt = "First Citizen:\nBefore we proceed any"
 context = torch.tensor(tokenizer.encode(prompt).ids, dtype=torch.long, device=device).unsqueeze(0)
 
 time_start = datetime.now()
 
-generated_tokens = model.generate(context, max_new_tokens=256)[0].tolist()
+stop_ids = tokenizer.encode("#END#").ids
+
+generated_tokens = model.generate(
+    context,
+    max_new_tokens=256,
+    temperature=0.8,
+    top_k=50,
+    top_p=0.9,
+    stop_ids=stop_ids,
+)[0].tolist()
+
 print("\n--- Generated Output ---")
 print(tokenizer.decode(generated_tokens, skip_special_tokens=False))
 print("------------------------")
