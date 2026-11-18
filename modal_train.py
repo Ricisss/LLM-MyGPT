@@ -44,6 +44,7 @@ def get_memory_usage():
 
 @app.function(image=image, gpu="H100", volumes={VOLUME_DIR: volume}, timeout=7200)
 def train_model():    
+    print("START")
     # Training parameters
     batch_size = 128
     block_size = 512
@@ -131,11 +132,7 @@ def train_model():
     data = torch.tensor(token_ids, dtype=torch.long)
 
     print("Total tokens:", len(data))
-
-    data = torch.tensor(token_ids, dtype=torch.long)
-
-    print("Total tokens:", len(data))
-
+    
     #Splitting the dataset into train and validation
     print("Splitting the dataset into train and validation...")
     n = int(0.9 * len(data))
